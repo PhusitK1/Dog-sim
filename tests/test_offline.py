@@ -38,6 +38,18 @@ class OfflineTest(unittest.TestCase):
                     path = os.path.normpath(os.path.join(STATIC, ref.lstrip("./")))
                     self.assertTrue(os.path.isfile(path), f"{page}: missing {ref}")
 
+    def test_every_bundled_library_has_a_license_notice(self):
+        vendor = os.path.join(STATIC, "vendor")
+        notices = open(os.path.join(vendor, "THIRD_PARTY_NOTICES.md"), encoding="utf-8").read()
+        for lib in os.listdir(vendor):
+            if os.path.isdir(os.path.join(vendor, lib)):
+                self.assertIn(f"`{lib}/", notices, f"static/vendor/{lib} is missing from THIRD_PARTY_NOTICES.md")
+
+    def test_pages_have_a_tab_icon(self):
+        for page in ("index.html", "manual.html"):
+            html = open(os.path.join(STATIC, page), encoding="utf-8").read()
+            self.assertRegex(html, r'<link rel="icon" href="favicon\.ico"', f"{page} has no tab icon")
+
     def test_app_imports_only_mapped_modules(self):
         app = open(os.path.join(STATIC, "app.js"), encoding="utf-8").read()
         imports = re.findall(r'^import .* from "([^"]+)";', app, re.M)
@@ -55,7 +67,9 @@ class OfflineTest(unittest.TestCase):
             for path, ctype in (("/vendor/three/three.module.js", "javascript"),
                                 ("/vendor/three/OrbitControls.js", "javascript"),
                                 ("/vendor/codemirror/codemirror.min.js", "javascript"),
-                                ("/vendor/codemirror/codemirror.min.css", "text/css")):
+                                ("/vendor/codemirror/codemirror.min.css", "text/css"),
+                                ("/favicon.ico", "image/"),
+                                ("/favicon.png", "image/png")):
                 with urllib.request.urlopen(base + path, timeout=5) as r:
                     self.assertEqual(r.status, 200, path)
                     self.assertIn(ctype, r.headers["Content-Type"], path)

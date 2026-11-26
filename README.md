@@ -4,6 +4,11 @@ A 3D simulator for the **Dobot Rover X1** quadruped. Write Python with the **sam
 real robot** ([dobot_quad SDK](https://github.com/Dobot-Team/dobot_quad_sdk)), with Auto-correct,
 a map editor and a built-in manual (Thai).
 
+> **Unofficial project.** This simulator is not affiliated with, endorsed by or sponsored by Dobot.
+> "Dobot" and "Rover X1" are trademarks of their owners and are used here only to say which robot and
+> SDK the simulator is compatible with. It contains no code from the Dobot SDK: the simulated
+> `dobot_quad` module is written from scratch so that the same program can run on the real robot.
+
 ## Start
 
 - Double-click **`RoverX1Sim.exe`** on the Desktop, or
@@ -55,7 +60,7 @@ Thai variable names, strings, docstrings and comments are left alone.
 
 ## Tests
 
-125 automated tests (standard `unittest`, nothing to install) cover Auto-correct (incl. a fuzz test),
+131 automated tests (standard `unittest`, nothing to install) cover Auto-correct (incl. a fuzz test),
 real-SDK fidelity, stairs / ledges / collisions / obstacle avoidance, the program runner (Stop,
 `time.sleep`, `input`, `exit`), the web server (CSRF / DNS rebinding, bad requests, file access, several
 windows) and run every example and every code sample of the manual.
@@ -80,3 +85,9 @@ or double-click `run_tests.bat`. Run them after every change, before rebuilding 
 
 Tune speeds and body size in `CONFIG` (`rover_sim.py`) and `MODE_SPEED` (`sdk_compat.py`).
 They are estimates - the SDK documentation does not list real speeds.
+
+## Credits
+
+- three.js and CodeMirror (MIT License) are bundled in `static/vendor/`; their license notices are in
+  [`static/vendor/THIRD_PARTY_NOTICES.md`](static/vendor/THIRD_PARTY_NOTICES.md).
+- The app icon was generated with Figma AI.
