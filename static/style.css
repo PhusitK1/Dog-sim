@@ -53,6 +53,7 @@ input[type=number] { width: 64px; }
 .badge { font-size: 10px; padding: 1px 7px; border-radius: 99px; letter-spacing: .05em; }
 .badge.idle { background: #2a313c; color: var(--muted); }
 .badge.run { background: var(--ok); color: #04210f; }
+.badge.cam { background: var(--accent2); color: #04161c; }
 
 .view-tools { position: absolute; top: 12px; right: 12px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .view-tools button { background: rgba(29,35,44,.88); }

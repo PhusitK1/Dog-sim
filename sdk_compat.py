@@ -22,10 +22,14 @@ speeds, dances, balancing) is an approximation for learning.
 import difflib
 import inspect
 import math
+import threading
+import time
 import types
+from dataclasses import dataclass, field
 from enum import Enum, IntEnum
+from typing import Optional
 
-from rover_sim import CONFIG, Motion, thai_to_english
+from rover_sim import CONFIG, Motion, StopSim, thai_to_english
 
 # ----------------------------------------------------------------------------
 # Constants (same values as the real SDK)
@@ -93,15 +97,97 @@ COLOR_RGB = {Color.OFF: (0, 0, 0), Color.RED: (255, 0, 0), Color.ORANGE: (255, 1
              Color.BLUE: (0, 0, 255), Color.PURPLE: (128, 0, 128), Color.WHITE: (255, 255, 255)}
 
 
+# ---- camera streaming types: same names and values as dobot_quad/video/types.py ----
 class CameraId(IntEnum):
-    FRONT_RGB = 1
-    REAR_RGB = 2
+    """Camera identifier."""
+    FRONT_RGB = 0  # Front RGB camera
+    REAR_RGB = 1   # Rear RGB camera
+
+    @property
+    def spec(self):
+        return CAMERA_SPECS[self]
+
+    @property
+    def rtsp_name(self):
+        """Stream name used inside the stream address."""
+        return CAMERA_SPECS[self].rtsp_name
+
+    @property
+    def dds_index(self):
+        return CAMERA_SPECS[self].dds_index
+
+    @property
+    def description(self):
+        return CAMERA_SPECS[self].description
+
+    def __str__(self):
+        return self.name
+
+
+@dataclass(frozen=True)
+class CameraSpec:
+    rtsp_name: str
+    dds_index: int
+    description: str
+    codec: str = "H.264"
+    resolution: str = "1280x720"
+
+
+CAMERA_SPECS = {
+    CameraId.FRONT_RGB: CameraSpec("camera1", 0, "Front RGB"),
+    CameraId.REAR_RGB: CameraSpec("camera2", 1, "Rear RGB"),
+}
+STREAM_CODEC = "H.264"
 
 
 class StreamState(Enum):
-    IDLE = "idle"
-    STREAMING = "streaming"
-    STOPPED = "stopped"
+    STOPPED = "stopped"        # Never opened, or closed again
+    PREPARING = "preparing"    # open() is waiting for the camera to really stream
+    READY = "ready"            # open() returned an address you can play
+    RECOVERING = "recovering"  # The stream dropped or stalled
+    STOPPING = "stopping"      # Last user released it
+    ERROR = "error"            # Recovery gave up; call open() to try again
+
+    def __str__(self):
+        return self.value
+
+
+class StreamOwner(Enum):
+    UNKNOWN = "unknown"
+    SDK = "sdk"
+    EXTERNAL = "external"
+
+    def __str__(self):
+        return self.value
+
+
+class LossReason(Enum):
+    NONE = "none"
+    EXTERNAL = "external"
+    STALL = "stall"
+    PORT_UNREACHABLE = "port_unreachable"
+    NO_DATA = "no_data"
+    CLOSED = "closed"
+
+    def __str__(self):
+        return self.value
+
+
+class RecoveredBy(Enum):
+    NONE = "none"
+    L1_RESUME = "L1_resume"
+    L2_RESTART = "L2_restart"
+
+    def __str__(self):
+        return self.value
+
+
+class StreamEventKind(Enum):
+    READY = "StreamReady"
+    LOST = "StreamLost"
+    RECONNECTED = "StreamReconnected"
+    CLOSED = "StreamClosed"
+    ERROR = "StreamError"
 
 
 class LegLedConfig:
@@ -114,24 +200,71 @@ class LegLedConfig:
         return f"LegLedConfig(leg={self.leg!r}, r={self.r}, g={self.g}, b={self.b}, brightness={self.brightness})"
 
 
-class CameraStreamInfo(types.SimpleNamespace):
-    pass
+@dataclass(frozen=True)
+class CameraStreamInfo:
+    """Snapshot returned by robot.video.get_stream_info()."""
+    camera: CameraId
+    state: StreamState = StreamState.STOPPED
+    owner: StreamOwner = StreamOwner.UNKNOWN
+    uri: str = ""
+    codec: str = STREAM_CODEC
+    bitrate_kbps: Optional[float] = None
+    reason: LossReason = LossReason.NONE
+    message: str = ""
+
+    @property
+    def available(self):
+        return self.state == StreamState.READY and bool(self.uri)
+
+    @property
+    def is_streaming(self):
+        return self.state == StreamState.READY
+
+    def to_dict(self):
+        return {"camera": self.camera.name, "state": self.state.value, "owner": self.owner.value,
+                "uri": self.uri, "codec": self.codec, "bitrate_kbps": self.bitrate_kbps,
+                "reason": self.reason.value, "message": self.message}
 
 
-class StreamEvent(types.SimpleNamespace):
-    pass
+@dataclass(frozen=True)
+class StreamEvent:
+    """Event passed to robot.video.on_state_change() callbacks."""
+    kind: StreamEventKind
+    camera: CameraId
+    old_state: StreamState
+    new_state: StreamState
+    reason: LossReason = LossReason.NONE
+    recovered_by: RecoveredBy = RecoveredBy.NONE
+    uri: str = ""
+    message: str = ""
+    timestamp: float = field(default_factory=time.monotonic)
+
+    @property
+    def name(self):
+        return self.kind.value
+
+    def to_dict(self):
+        return {"event": self.name, "camera": self.camera.name, "old_state": self.old_state.value,
+                "new_state": self.new_state.value, "reason": self.reason.value,
+                "recovered_by": self.recovered_by.value, "uri": self.uri, "message": self.message,
+                "timestamp": self.timestamp}
 
 
-class VideoError(Exception):
-    pass
+class VideoError(RuntimeError):
+    """Base class of every exception raised by robot.video."""
+
+    def __init__(self, message, *, reason=LossReason.NONE, camera=None):
+        super().__init__(message)
+        self.reason = reason
+        self.camera = camera
 
 
 class VideoConnectionError(VideoError):
-    pass
+    """The robot or its streaming service could not be reached."""
 
 
 class VideoTimeoutError(VideoError):
-    pass
+    """The operation did not finish in time."""
 
 
 def _result(success=True, **kw):
@@ -263,7 +396,8 @@ class SimRobotClient:
         return False
 
     def close(self):
-        """Close the connection."""
+        """Close the connection (also releases every camera stream, like the real SDK)."""
+        self.video.close_all()
         self._log("🔌 [sim] Connection closed", "sys")
 
     def __repr__(self):
@@ -920,34 +1054,221 @@ class SimRobotClient:
 
 
 class _SimVideo:
+    """robot.video - the robot's RGB camera streams (VideoStreamManager in the real SDK).
+
+    The images are rendered from the 3D scene by the simulator page. open() blocks until frames
+    really flow, like on the robot, and returns an http:// MJPEG address that cv2.VideoCapture
+    and ffmpeg play the same way as the robot's rtsp://<ip>:8554/camera1 address.
+    """
+    READY_TIMEOUT = 8.0          # how long open() waits for the stream (same as the real SDK)
+
     def __init__(self, client):
         self._c = client
+        self._lock = threading.Lock()
+        self._refs = {}          # CameraId -> open() calls not closed yet
+        self._info = {}          # CameraId -> last CameraStreamInfo
+        self._listeners = []
+        self._shut = False
+        self._told = set()
 
-    def open(self, camera=CameraId.FRONT_RGB):
-        self._c._log("📷 [sim] no camera image in the simulator - the real robot returns "
-                     "rtsp://192.168.5.2:8554/camera1", "warn")
-        return f"rtsp://sim/camera{int(camera)}"
+    @property
+    def _hub(self):
+        return self._c._world.cams
 
-    def close(self, camera=CameraId.FRONT_RGB):
-        return True
+    @property
+    def host(self):
+        return str(self._c._addr).rsplit(":", 1)[0]
 
-    def close_all(self):
-        return True
+    def uri(self, camera):
+        """Address of this camera's stream; does not touch the robot."""
+        return self._hub.uri(CameraId(camera))
 
     def list_cameras(self):
-        return [CameraId.FRONT_RGB, CameraId.REAR_RGB]
+        return list(CAMERA_SPECS)
 
-    def is_streaming(self, camera=CameraId.FRONT_RGB):
-        return False
+    def _set(self, cam, state, kind=None, reason=LossReason.NONE, uri="", message=""):
+        old = self._info.get(cam, CameraStreamInfo(camera=cam)).state
+        info = CameraStreamInfo(camera=cam, state=state, owner=StreamOwner.SDK if uri else StreamOwner.UNKNOWN,
+                                uri=uri, reason=reason, message=message)
+        self._info[cam] = info
+        if kind is not None:
+            event = StreamEvent(kind=kind, camera=cam, old_state=old, new_state=state, reason=reason,
+                                uri=uri, message=message)
+            for cb in list(self._listeners):
+                try:
+                    cb(event)
+                except StopSim:
+                    raise
+                except Exception as e:  # noqa: BLE001 - a broken callback must not break streaming
+                    self._c._log(f"⚠ video callback failed: {type(e).__name__}: {e}", "warn")
 
-    def get_stream_info(self, camera=CameraId.FRONT_RGB):
-        return CameraStreamInfo(uri=f"rtsp://sim/camera{int(camera)}", message="simulator")
+    def open(self, camera):
+        """Starts this camera's stream and blocks until data is really flowing; returns the
+        address to hand to cv2.VideoCapture. Raises VideoTimeoutError if no image arrives."""
+        cam = CameraId(camera)
+        hub = self._hub
+        with self._lock:
+            if self._shut:
+                raise VideoError(f"{cam.name}: the video manager was shut down", camera=cam)
+            self._refs[cam] = self._refs.get(cam, 0) + 1
+            already = self._refs[cam] > 1 and self._info.get(cam) and self._info[cam].state is StreamState.READY
+        hub.want(int(cam), +1)
+        if already:
+            return self._info[cam].uri
+        self._set(cam, StreamState.PREPARING)
+        after = hub.last_seq(int(cam))
+        deadline = time.monotonic() + self.READY_TIMEOUT
+        while hub.wait_new(int(cam), after, 0.2) is None:
+            self._c._rv.check_stop()
+            if time.monotonic() >= deadline:
+                with self._lock:
+                    self._refs[cam] -= 1
+                    if self._refs[cam] <= 0:
+                        del self._refs[cam]
+                hub.want(int(cam), -1)
+                self._set(cam, StreamState.STOPPED, reason=LossReason.NO_DATA,
+                          message="open() failed; local state released")
+                self._c._log("💡 [sim] camera images come from the simulator page in the browser: "
+                              "keep it open (not minimised) while the program runs", "warn")
+                raise VideoTimeoutError(
+                    f"{cam.name}: the stream was not ready within {self.READY_TIMEOUT:.1f} s. "
+                    f"It may still be starting up: try again in a few seconds.",
+                    reason=LossReason.NO_DATA, camera=cam)
+        uri = hub.uri(cam)
+        self._set(cam, StreamState.READY, StreamEventKind.READY, uri=uri)
+        if cam not in self._told:
+            self._told.add(cam)
+            self._c._log(f"📷 [sim] {cam.name} streams the 3D view at {uri} "
+                         f"(the real robot gives rtsp://<robot ip>:8554/{cam.rtsp_name})", "info")
+        return uri
+
+    def is_streaming(self, camera):
+        cam = CameraId(camera)
+        with self._lock:
+            open_ = self._refs.get(cam, 0) > 0
+        return open_ and self._info.get(cam) is not None and self._info[cam].state is StreamState.READY
+
+    def get_stream_info(self, camera):
+        cam = CameraId(camera)
+        return self._info.get(cam) or CameraStreamInfo(camera=cam)
 
     def on_state_change(self, callback):
+        """Subscribes to stream events; the returned function unsubscribes."""
+        if not callable(callback):
+            raise TypeError("callback must be callable")
+        self._listeners.append(callback)
+
+        def _unsubscribe():
+            try:
+                self._listeners.remove(callback)
+            except ValueError:
+                pass
+        return _unsubscribe
+
+    def close(self, camera):
+        """Stops using this camera (idempotent); the stream stops when the last user releases it."""
+        cam = CameraId(camera)
+        with self._lock:
+            n = self._refs.get(cam, 0)
+            if n == 0:
+                return
+            if n > 1:
+                self._refs[cam] = n - 1
+            else:
+                del self._refs[cam]
+        self._hub.want(int(cam), -1)
+        if n == 1:
+            self._set(cam, StreamState.STOPPED, StreamEventKind.CLOSED, reason=LossReason.CLOSED,
+                      uri=self._info.get(cam, CameraStreamInfo(camera=cam)).uri,
+                      message="Stream stopped, resources released")
+
+    def stop_stream(self, camera):
+        cam = CameraId(camera)
+        with self._lock:
+            n = self._refs.pop(cam, 0)
+        if n:
+            self._hub.want(int(cam), -n)
+            self._set(cam, StreamState.STOPPED, StreamEventKind.CLOSED, reason=LossReason.CLOSED,
+                      message="Stream stopped")
+
+    def close_all(self, *, reason=LossReason.CLOSED, message=""):
+        """Releases every camera (idempotent)."""
+        with self._lock:
+            refs, self._refs = self._refs, {}
+        for cam, n in refs.items():
+            self._hub.want(int(cam), -n)
+            self._set(cam, StreamState.STOPPED, StreamEventKind.CLOSED, reason=reason, message=message)
+
+    def shutdown(self):
+        self.close_all()
+        self._shut = True
+
+    close_manager = shutdown
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        self.shutdown()
+
+
+class _GrpcFutureTimeoutError(Exception):
+    pass
+
+
+class _GrpcRpcError(Exception):
+    pass
+
+
+class _SimChannel:
+    def __init__(self, target):
+        self.target = target
+        self._closed = False
+
+    def close(self):
+        self._closed = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        self.close()
+
+
+class _SimReadyFuture:
+    def __init__(self, channel):
+        self._ch = channel
+
+    def result(self, timeout=None):
+        if not isinstance(self._ch, _SimChannel):
+            raise TypeError("channel_ready_future() needs a channel from grpc.insecure_channel()")
+        if self._ch._closed:
+            raise ValueError("Cannot invoke RPC on closed channel!")
         return None
 
-    def stop_stream(self, camera=CameraId.FRONT_RGB):
+    def done(self):
         return True
+
+    def cancel(self):
+        return False
+
+
+def make_grpc_module():
+    """The part of grpc that robot programs use to wait for the robot; in the simulator every
+    channel reaches the simulated robot at once. Anything else is reported as missing."""
+    mod = types.ModuleType("grpc")
+    mod.__doc__ = "Simulated grpc (Rover X1 Simulator): channels reach the simulated robot"
+    mod.insecure_channel = lambda target, options=None, compression=None: _SimChannel(target)
+    mod.channel_ready_future = _SimReadyFuture
+    mod.FutureTimeoutError = _GrpcFutureTimeoutError
+    mod.RpcError = _GrpcRpcError
+
+    def __getattr__(name):
+        raise AttributeError(f"module 'grpc' has no attribute '{name}' in the simulator - it only provides "
+                             f"insecure_channel, channel_ready_future, FutureTimeoutError and RpcError. "
+                             f"💡 Talk to the robot through dobot_quad.RobotClient")
+    mod.__getattr__ = __getattr__
+    return mod
 
 
 # ----------------------------------------------------------------------------

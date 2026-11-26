@@ -47,7 +47,7 @@
 
 <div class="toc">
   <a href="#start">เริ่มต้น</a><a href="#state">สถานะ</a><a href="#move">เคลื่อนที่</a><a href="#balance">ทรงตัว</a>
-  <a href="#fx">ท่าพิเศษ & ไฟ</a><a href="#read">อ่านข้อมูล</a><a href="#auto">Auto-correct</a><a href="#map">Map</a>
+  <a href="#fx">ท่าพิเศษ & ไฟ</a><a href="#read">อ่านข้อมูล</a><a href="#camera">กล้อง</a><a href="#auto">Auto-correct</a><a href="#map">Map</a>
   <a href="#ex">โจทย์ฝึก</a><a href="#real">ใช้กับหุ่นจริง</a><a href="#diff" class="sim">ข้อจำกัด</a>
 </div>
 
@@ -177,6 +177,38 @@ vx, vy, vz = s.robot_state.vel_body       # ความเร็ว (m/s)
 print(round(x, 2), round(y, 2), round(yaw, 2))</code><button class="try">ลองโค้ดนี้</button></pre>
 <p class="muted">อื่น ๆ: <code>get_robot_type()</code> → "miniQuad" · <code>is_quad()</code> · <code>get_motions()</code> · ในโปรแกรมจำลองค่าแรงบิด/ข้อต่อ (<code>jtau_leg</code> ฯลฯ) เป็น 0</p>
 
+<h3 id="camera">กล้องของหุ่น (<code>robot.video</code>)</h3>
+<p>หุ่นมีกล้องสี (RGB) ด้านหน้า <code>CameraId.FRONT_RGB</code> และด้านหลัง <code>CameraId.REAR_RGB</code>
+ในโปรแกรมจำลอง ภาพมาจากฉาก 3 มิติ ตามตำแหน่งและท่าทางของหุ่น ใช้กับ OpenCV ได้ด้วยโค้ดชุดเดียวกับหุ่นจริง</p>
+<pre class="cam"><code>import cv2
+from dobot_quad import RobotClient, CameraId
+
+robot = RobotClient("192.168.5.2:50051")
+uri = robot.video.open(CameraId.FRONT_RGB)      # รอจนภาพมาจริง แล้วคืนที่อยู่ของสตรีม
+cap = cv2.VideoCapture(uri, cv2.CAP_FFMPEG)
+try:
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        cv2.imshow("front camera", frame)
+        if cv2.waitKey(1) &amp; 0xFF == ord("q"):     # กด q ที่หน้าต่างภาพเพื่อออก
+            break
+finally:
+    cap.release()
+    robot.video.close(CameraId.FRONT_RGB)
+    cv2.destroyAllWindows()</code><button class="try">ลองโค้ดนี้</button></pre>
+<ul>
+<li><code>open()</code> รอภาพนานสุด 8 วินาที ถ้าไม่มีภาพจะเกิด <code>VideoTimeoutError</code> เหมือนของจริง
+  ในโปรแกรมจำลอง <b>ต้องเปิดหน้านี้ค้างไว้ (ห้ามย่อหน้าต่าง)</b> เพราะภาพถูกวาดที่หน้าเว็บนี้ ระหว่างส่งภาพจะมีป้าย 📷 ที่มุมซ้ายบน</li>
+<li>ที่อยู่ที่ได้ — หุ่นจริง: <code>rtsp://&lt;IP&gt;:8554/camera1</code> · โปรแกรมจำลอง: <code>http://127.0.0.1:8765/video/camera1</code>
+  ทั้งสองแบบส่งให้ <code>cv2.VideoCapture</code> ได้เหมือนกัน (อย่าเขียนโค้ดที่เช็กว่าขึ้นต้นด้วย <code>rtsp://</code>)</li>
+<li><code>open()</code> กล้องเดียวกันซ้ำได้ ต้อง <code>close()</code> ให้ครบจำนวนครั้ง · <code>robot.close()</code> ปิดกล้องทั้งหมดให้</li>
+<li>หน้าต่าง <code>cv2.imshow</code> จะเปิดขึ้นบน Windows เหมือนรันจริง กด ■ Stop แล้วหน้าต่างปิดเอง (โค้ดใน <code>finally:</code> ยังได้ทำงาน)</li>
+<li>กล้องความลึก (depth) และ DDS ยังไม่ได้จำลอง โปรแกรมที่ <code>import dds_middleware_python</code> จะเจอ <code>ModuleNotFoundError</code> เหมือนเครื่องที่ไม่ได้ติดตั้ง</li>
+<li>บนหุ่นจริง/WSL ต้องติดตั้ง OpenCV เอง: <code>pip install opencv-python</code> (ใน <code>RoverX1Sim.exe</code> มีให้แล้ว)</li>
+</ul>
+
 <h2 id="auto">7. Auto-correct</h2>
 <ul>
 <li>พิมพ์หยุดไปสักครู่ ระบบจะตรวจโค้ด: <b style="color:#ffc53d">สีเหลือง</b> = น่าจะพิมพ์ผิด (มีปุ่ม <b>Fix all</b>), <b style="color:#ff6b6b">สีแดง</b> = ไม่รู้จัก/SyntaxError</li>
@@ -254,8 +286,8 @@ robot.stand_down()</code><button class="try">ลองโค้ดนี้</but
 <li><code>robot.*</code> ใช้ <b>ชื่อคำสั่ง/พารามิเตอร์/ช่วงค่า ตามเอกสาร SDK</b> แต่ผลที่ได้เป็นการประมาณ — ความเร็วที่ speed_ratio 100 ตั้งไว้ เดิน 1.0 m/s, วิ่ง 1.8 m/s (ไม่มีในเอกสาร ปรับได้ที่ <code>MODE_SPEED</code> ใน <code>sdk_compat.py</code>)</li>
 <li>ไม่มีฟิสิกส์จริง (แรง การลื่น การล้ม) ท่าเต้น/กระโดด/ตีลังกาเป็นแค่ภาพเคลื่อนไหว</li>
 <li>ระบบหลบสิ่งกีดขวางในนี้หยุดหุ่นเมื่อเข้าใกล้ ~12 cm — ของจริงอาจทำงานต่างไป</li>
-<li>Low-level SDK (DDS: มอเตอร์รายข้อ, IMU ดิบ, กล้อง RGB/Depth, แบตเตอรี่) และ <code>robot.video</code> ยังไม่ได้จำลอง — จึงไม่มีเซนเซอร์วัดระยะให้ใช้ ใช้ระบบหลบสิ่งกีดขวาง + <code>.success</code> แทน (ดูตัวอย่างที่ 5)</li>
-<li>ในโปรแกรมจำลองมีตัวแปร <code>robot</code> สร้างไว้ให้แล้ว แต่บนหุ่นจริงต้องเขียน <code>robot = RobotClient("IP:50051")</code> เอง</li>
+<li>กล้องสี <code>robot.video</code> จำลองแล้ว (ภาพจากฉาก 3 มิติ ดูหัวข้อ 6) แต่ Low-level SDK (DDS: มอเตอร์รายข้อ, IMU ดิบ, กล้องความลึก, แบตเตอรี่) ยังไม่ได้จำลอง — จึงไม่มีเซนเซอร์วัดระยะให้ใช้ ใช้ระบบหลบสิ่งกีดขวาง + <code>.success</code> แทน (ดูตัวอย่างที่ 5)</li>
+<li>เหมือนหุ่นจริง: ไม่มีอะไรสร้างไว้ให้ล่วงหน้า ทุกโปรแกรมต้อง <code>from dobot_quad import RobotClient</code> และ <code>robot = RobotClient("IP:50051")</code> เอง (Auto-correct เติมให้ถ้าลืม)</li>
 <li>หุ่นแบบล้อ (miniQuadW: <code>wheel_loco</code>, <code>drift</code>, <code>handstand</code>) ไม่รองรับ — Rover X1 ในนี้เป็นแบบขา</li>
 </ul>
 </div>

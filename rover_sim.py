@@ -13,6 +13,7 @@ Numbers (speed, body size) are approximations - tune them in CONFIG below.
 """
 import difflib
 import math
+import os
 import sys
 import threading
 import time
@@ -47,6 +48,7 @@ THAI_WORDS = {
 }
 
 PROGRAM_FILENAME = "<rover_program>"
+STOP_GRACE = 1.5         # after Stop, cleanup code (finally:) may run this long before Stop is raised again
 
 
 def default_map():
@@ -66,8 +68,98 @@ def default_map():
     }
 
 
-class StopSim(Exception):
-    """Raised when the user presses Stop."""
+class StopSim(BaseException):
+    """Raised when the user presses Stop. A BaseException like KeyboardInterrupt (Ctrl+C on the
+    robot), so `except Exception:` in a program does not swallow it."""
+
+
+def _raise_in_thread(tid, exc=StopSim):
+    """Raise `exc` in another (or this) thread at its next bytecode, like Ctrl+C does. Unlike raising
+    from a trace function, this keeps the thread traced, so Stop can be raised again later."""
+    import ctypes
+    ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_ulong(tid), ctypes.py_object(exc) if exc else None)
+
+
+class CameraHub:
+    """Live images of the robot's RGB cameras.
+
+    robot.video.open(camera) asks for a camera; every open simulator page renders the cameras
+    that are asked for from the 3D scene and uploads JPEG frames (POST /api/frame); the server
+    streams them as MJPEG at /video/<name>, which cv2.VideoCapture can play like the robot's RTSP.
+    """
+    NAMES = {0: "camera1", 1: "camera2"}     # CameraId value -> stream name, same as on the robot
+
+    def __init__(self):
+        self.cv = threading.Condition()
+        self.frames = {}       # cam -> (seq, monotonic time, jpeg bytes)
+        self.demand = {}       # cam -> number of open() calls not closed yet
+        self.seq = 0
+        self.port = 8765       # set by the web server that streams the frames
+
+    def want(self, cam, delta):
+        with self.cv:
+            n = self.demand.get(cam, 0) + delta
+            if n > 0:
+                self.demand[cam] = n
+            else:
+                self.demand.pop(cam, None)
+            self.cv.notify_all()
+
+    def release_all(self):
+        with self.cv:
+            self.demand.clear()
+            self.cv.notify_all()
+
+    def wanted(self):
+        with self.cv:
+            return sorted(self.demand)
+
+    def put(self, cam, jpeg):
+        with self.cv:
+            self.seq += 1
+            self.frames[cam] = (self.seq, time.monotonic(), bytes(jpeg))
+            self.cv.notify_all()
+
+    def latest(self, cam):
+        with self.cv:
+            return self.frames.get(cam)
+
+    def last_seq(self, cam):
+        with self.cv:
+            return self.frames.get(cam, (0,))[0]
+
+    def wait_new(self, cam, after_seq, timeout):
+        """Next frame newer than after_seq, or None after `timeout` seconds."""
+        with self.cv:
+            self.cv.wait_for(lambda: self.frames.get(cam, (0,))[0] > after_seq, timeout)
+            f = self.frames.get(cam)
+            return f if f and f[0] > after_seq else None
+
+    def fresh(self, cam, max_age=2.0):
+        f = self.latest(cam)
+        return bool(f) and time.monotonic() - f[1] < max_age
+
+    def uri(self, cam):
+        return f"http://127.0.0.1:{self.port}/video/{self.NAMES[int(cam)]}"
+
+
+_ACTIVE = {}     # the program that is running now: {"world": World, "g": globals}
+
+
+def _thread_excepthook(args, _default=threading.excepthook):
+    """Errors in threads started by a user program go to the Console (Stop ends them quietly)."""
+    if args.exc_type is not None and issubclass(args.exc_type, StopSim):
+        return
+    tb = traceback.extract_tb(args.exc_traceback) if args.exc_traceback else []
+    world = _ACTIVE.get("world")
+    if world is not None and any(f.filename == PROGRAM_FILENAME for f in tb):
+        name = args.thread.name if args.thread else "?"
+        world.log(f"✖ in thread '{name}', " + friendly_error(args.exc_value, _ACTIVE.get("g", {}))[2:], "error")
+        return
+    _default(args)
+
+
+threading.excepthook = _thread_excepthook
 
 
 def _num(v, default=None):
@@ -127,6 +219,8 @@ class World:
         self.run_id = 0         # increases with every Run, so each browser window knows its own program
         self.boot = f"{time.time():.6f}"   # changes when the server restarts (open pages resync)
         self.trail_id = 0
+        self.cams = CameraHub()
+        self.main_tid = None    # thread running the user program's main code
         self.reset_robot()
 
     # ---------- logging ----------
@@ -234,6 +328,7 @@ class World:
                 "line": self.cur_line,
                 "run_id": self.run_id,
                 "boot": self.boot,
+                "cams": self.cams.wanted(),     # cameras a program is watching: pages render them
             }
 
     # ---------- run user code ----------
@@ -245,7 +340,9 @@ class World:
             self.stop_flag.clear()
             self.run_id += 1
             self.cur_line = None
-        self.thread = threading.Thread(target=self._exec, args=(code,), daemon=True)
+        # Not a daemon thread, like a script's main thread: threads the program starts are then
+        # non-daemon by default, as in real Python (the server stops the program when it quits).
+        self.thread = threading.Thread(target=self._exec, args=(code,), name="rover-program", daemon=False)
         self.thread.start()
         return self.run_id
 
@@ -258,6 +355,7 @@ class World:
 
         motion = Motion(self)
         sdk_mod = sdk_compat.make_module(self)
+        grpc_mod = sdk_compat.make_grpc_module()
         real_import = builtins.__import__
 
         # time.sleep() in user code follows the sim speed and stops with the Stop button
@@ -268,6 +366,8 @@ class World:
         def sim_import(name, globals=None, locals=None, fromlist=(), level=0):
             if name == "dobot_quad" or name.startswith("dobot_quad."):
                 return sdk_mod                 # use the simulated SDK instead of the real one
+            if name == "grpc":
+                return grpc_mod                # channels reach the simulated robot
             if name == "time":
                 return sim_time_mod
             return real_import(name, globals, locals, fromlist, level)
@@ -282,28 +382,54 @@ class World:
         bi["input"] = no_input
         # Nothing is pre-loaded: like on the real robot the program must import dobot_quad
         # and create robot = RobotClient(...) itself (Auto-correct adds missing lines).
-        g = {"__name__": "__main__", "__builtins__": bi}
+        # Like a script started with `python program.py`: __file__ and sys.argv are its own.
+        program_file = os.path.join(os.getcwd(), "program.py")
+        g = {"__name__": "__main__", "__file__": program_file, "__builtins__": bi}
 
         stop_flag = self.stop_flag
+        run_over = threading.Event()     # the program has ended: threads it started must end too
         world = self
+        main_tid = threading.get_ident()
+        self.main_tid = main_tid
+        user_threads = set()
+        raised = {}                      # thread id -> (first, last) time Stop was raised in it
 
         def local_trace(frame, event, arg):
-            if stop_flag.is_set():
-                raise StopSim()
-            if event == "line":
+            if stop_flag.is_set() or run_over.is_set():
+                # Like Ctrl+C: raise once, so finally/cleanup code can still run. A program that
+                # keeps going anyway gets Stop again every 0.2 s after STOP_GRACE seconds.
+                tid = threading.get_ident()
+                now = time.monotonic()
+                first, last = raised.get(tid, (None, 0.0))
+                if first is None:
+                    raised[tid] = (now, now)
+                    _raise_in_thread(tid)
+                elif now - first > STOP_GRACE and now - last > 0.2:
+                    raised[tid] = (first, now)
+                    _raise_in_thread(tid)
+                return local_trace
+            if event == "line" and threading.get_ident() == main_tid:
                 world.cur_line = frame.f_lineno
             return local_trace
 
         def global_trace(frame, event, arg):
             if frame.f_code.co_filename == PROGRAM_FILENAME:
+                if threading.get_ident() != main_tid:
+                    user_threads.add(threading.current_thread())
                 return local_trace
             return None
 
         self.log("▶ Program started", "sys")
+        before = set(threading.enumerate())      # threads that are not the program's
+        old_argv = sys.argv
+        sys.argv = [program_file]
+        _ACTIVE.update(world=self, g=g)
         try:
             compiled = compile(code, PROGRAM_FILENAME, "exec")
             sys.settrace(global_trace)
+            threading.settrace(global_trace)       # threads the program starts are stoppable too
             exec(compiled, g)
+            self._wait_threads(before)             # non-daemon threads keep a program alive
             self.log(f"✔ Program finished (simulated time {self.sim_time:.1f} s)", "sys")
         except StopSim:
             self.log("■ Program stopped", "sys")
@@ -318,9 +444,43 @@ class World:
             self.log(friendly_error(e, g), "error")
         finally:
             sys.settrace(None)
+            threading.settrace(None)
+            _raise_in_thread(main_tid, None)       # drop a Stop that has not been delivered yet
+            run_over.set()
+            self._end_program(user_threads)
+            sys.argv = old_argv
+            _ACTIVE.clear()
+            self.main_tid = None
             with self.lock:
                 self.r["vx"] = self.r["vy"] = self.r["wz"] = 0.0
                 self.running = False
+
+    def _wait_threads(self, before):
+        """Real Python keeps running until every non-daemon thread has finished."""
+        me = threading.current_thread()
+        while True:
+            alive = [t for t in threading.enumerate()
+                     if t not in before and t is not me and t.is_alive() and not t.daemon]
+            if not alive:
+                return
+            if self.stop_flag.is_set():
+                raise StopSim()
+            alive[0].join(0.1)
+
+    def _end_program(self, user_threads):
+        """What the end of a real process does: windows close, daemon threads end, the
+        robot's camera streams are released."""
+        cv2 = sys.modules.get("cv2")
+        if cv2 is not None:
+            try:
+                cv2.destroyAllWindows()
+                cv2.waitKey(1)
+            except Exception:  # noqa: BLE001
+                pass
+        deadline = time.monotonic() + 2.0
+        for t in list(user_threads):
+            t.join(max(0.0, deadline - time.monotonic()))
+        self.cams.release_all()
 
 
 def friendly_error(e, g):
@@ -500,8 +660,9 @@ class Motion:
         t = 0.0
         while t < seconds - 1e-9:
             chunk = min(seconds - t, max(CONFIG["dt"], 0.005 * max(self._w.speed_factor, 0.05)))
-            with self._w.lock:
-                self._w.sim_time += chunk
+            if self._w.main_tid in (None, threading.get_ident()):   # helper threads add no sim time
+                with self._w.lock:
+                    self._w.sim_time += chunk
             self.sleep(chunk)
             t += chunk
 

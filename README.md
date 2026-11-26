@@ -39,6 +39,14 @@ robot.stand_down()
   yourself (the current SDK code does not switch it on). Walk commands return `.success`.
 - The Console shows each command as it runs (▶) and tells you when a value was clamped.
 
+**Cameras.** `robot.video.open(CameraId.FRONT_RGB / REAR_RGB)` works like on the robot: it blocks until
+images flow and returns a stream address for `cv2.VideoCapture`. The images are rendered from the 3D
+scene by the simulator page (keep it open) and streamed as MJPEG at `/video/camera1` / `camera2`
+(the robot gives `rtsp://<ip>:8554/camera1`). Programs also get `__file__`, their own `sys.argv`
+(argparse defaults apply), a `grpc` whose channels reach the simulated robot, and threads that end
+with the program. Stop works like Ctrl+C, so `finally:` cleanup still runs. Depth cameras / DDS are
+not simulated yet.
+
 **Poka-yoke - the simulator is at least as strict as the real SDK** (rules taken from the SDK source):
 
 - no simulator-only commands, and nothing pre-loaded: every program imports `dobot_quad` and creates

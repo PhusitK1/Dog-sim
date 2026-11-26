@@ -10,6 +10,7 @@ import mimetypes
 import os
 import sys
 import threading
+import time
 import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -66,6 +67,10 @@ class Handler(BaseHTTPRequestHandler):
         if origin is not None and origin.strip().rstrip("/").lower() not in {f"http://{h}" for h in hosts}:
             return False
         content_type = (self.headers.get("Content-Type") or "").lower()
+        if post and urlparse(self.path).path == "/api/frame":
+            return content_type.startswith("image/jpeg")   # camera frames from the 3D page
+        # (application/json and image/jpeg both need a CORS preflight, which this server never
+        # answers, so another site's page cannot send them)
         return not post or content_type.startswith("application/json")
 
     def do_GET(self):
@@ -113,10 +118,50 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/docs":
             self._json(api_docs())
             return
+        if u.path.startswith("/video/"):
+            self._video(u.path[len("/video/"):])
+            return
         self._static(u.path)
+
+    def _video(self, name):
+        """MJPEG stream of one robot camera (what robot.video.open() returns). Plays in
+        cv2.VideoCapture / ffmpeg / a browser, like the robot's RTSP stream."""
+        cams = WORLD.cams
+        cam = next((c for c, n in cams.NAMES.items() if n == name), None)
+        if cam is None:
+            self._json({"ok": False, "error": f"no camera '{name}' (camera1 = front, camera2 = rear)"}, 404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        last, idle_since = 0, time.monotonic()
+        try:
+            while True:
+                f = cams.wait_new(cam, last, 1.0)
+                if f is None:
+                    # no new image: the program closed the camera or the page stopped rendering
+                    if cam not in cams.wanted() and time.monotonic() - idle_since > 2.0:
+                        return
+                    f = cams.latest(cam)
+                    if f is None:
+                        continue
+                else:
+                    idle_since = time.monotonic()
+                last = f[0]
+                data = f[2]
+                self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n"
+                                 % len(data) + data + b"\r\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
 
     def _post(self):
         u = urlparse(self.path)
+        if u.path == "/api/frame":
+            self._frame(u)
+            return
         try:
             body = self._body()
         except (ValueError, UnicodeDecodeError):
@@ -177,6 +222,24 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json({"ok": False, "error": "not found"}, 404)
 
+    def _frame(self, u):
+        """A camera image rendered by the 3D page (JPEG)."""
+        n = int(self.headers.get("Content-Length", 0) or 0)
+        if not 0 < n <= 4_000_000:
+            self._drain()
+            raise ValueError("expected a JPEG body of at most 4 MB")
+        data = self.rfile.read(n)      # read before any error reply, or the client may get a reset
+        try:
+            cam = int(parse_qs(u.query).get("cam", ["-1"])[0])
+        except ValueError:
+            cam = -1
+        if cam not in WORLD.cams.NAMES:
+            raise ValueError("expected ?cam=0 (front) or ?cam=1 (rear)")
+        if not data.startswith(b"\xff\xd8"):
+            raise ValueError("the body is not a JPEG image")
+        WORLD.cams.put(cam, data)
+        self._json({"ok": True})
+
     def _static(self, path):
         if path in ("/", ""):
             path = "/index.html"
@@ -204,6 +267,10 @@ class Server(ThreadingHTTPServer):
     # On Windows, SO_REUSEADDR would let a second copy bind the same port - keep it off
     allow_reuse_address = os.name != "nt"
     daemon_threads = True
+
+    def server_activate(self):
+        super().server_activate()
+        WORLD.cams.port = self.server_address[1]     # camera stream addresses point here
 
 
 def already_running(url):
@@ -248,6 +315,8 @@ def main():
         srv.serve_forever()
     except KeyboardInterrupt:
         print("\nSimulator closed")
+    finally:
+        WORLD.stop()          # a running program must not keep the process alive
 
 
 if __name__ == "__main__":

@@ -37,6 +37,11 @@ scene.background = new THREE.Color(0x0f1216);
 scene.fog = new THREE.Fog(0x0f1216, 18, 45);
 
 const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 200);
+// Layer 1 = helpers that exist only in the editor view (axes, start marker, trail, cursor):
+// the main view shows them, the robot's own cameras do not.
+const EDITOR_LAYER = 1;
+camera.layers.enable(EDITOR_LAYER);
+const editorOnly = (o) => { o.traverse((c) => c.layers.set(EDITOR_LAYER)); return o; };
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
@@ -116,7 +121,7 @@ function buildMap(m) {
   // X axis (red), Y axis (green)
   const axis = (dx, dy, color) => {
     const a = new THREE.ArrowHelper(S2T(dx, dy).normalize(), new THREE.Vector3(0, 0.01, 0), 1, color, 0.18, 0.1);
-    mapGroup.add(a);
+    mapGroup.add(editorOnly(a));
   };
   axis(1, 0, 0xff5555); axis(0, 1, 0x55ff77);
 
@@ -177,7 +182,7 @@ function buildMap(m) {
   ag.add(arrow);
   ag.position.copy(S2T(st.x, st.y, 0.005));
   ag.rotation.y = THREE.MathUtils.degToRad(st.yaw || 0);
-  mapGroup.add(ag);
+  mapGroup.add(editorOnly(ag));
 
   // fit light and shadows to the field size
   const c = S2T(W / 2, D / 2);
@@ -472,7 +477,7 @@ trailGeo.setAttribute("position", new THREE.BufferAttribute(trailPos, 3));
 trailGeo.setDrawRange(0, 0);
 const trailLine = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ color: 0x00d0ff, transparent: true, opacity: 0.7 }));
 trailLine.frustumCulled = false;
-scene.add(trailLine);
+scene.add(editorOnly(trailLine));
 let trailCount = 0, trailId = -1;
 
 function pushTrail(state) {
@@ -562,6 +567,7 @@ async function applyState(s) {
       gm.userData.ring.material.color.set(ok ? 0x2bd46a : 0xff3b3b);
     });
   }
+  showCams(s.cams);
   const mine = s.running && s.run_id === myRunId;
   setRunning(s.running, mine);
   setCurLine(mine ? s.line : null);   // never highlight a line of another window's program
@@ -591,6 +597,58 @@ function setRunning(r, mine = true) {
 }
 
 // ============================================================================
+// Robot cameras (robot.video). While a program has a camera open, this page renders what the
+// front / rear RGB camera sees and uploads JPEG frames; the simulator streams them to the
+// program (cv2.VideoCapture) the way the real robot streams RTSP.
+// ============================================================================
+const CAM_W = 640, CAM_H = 360, CAM_FPS = 12;
+const CAM_VFOV = 2 * Math.atan(Math.tan((87 / 2) * Math.PI / 180) * CAM_H / CAM_W) * 180 / Math.PI;  // 87° wide
+const robotCams = [0, 1].map((id) => {                 // index = CameraId value (0 front, 1 rear)
+  const c = new THREE.PerspectiveCamera(CAM_VFOV, CAM_W / CAM_H, 0.03, 60);
+  if (id === 0) { c.position.set(0.40, -0.02, 0); c.rotation.y = -Math.PI / 2; }   // looks forward (+x)
+  else { c.position.set(-0.32, -0.02, 0); c.rotation.y = Math.PI / 2; }           // looks backward
+  torso.add(c);
+  return c;
+});
+let wantedCams = [];
+let camRenderer = null, camBusy = false, camLast = 0;
+
+function camTick(now) {
+  if (!wantedCams.length || camBusy || now - camLast < 1000 / CAM_FPS) return;
+  camLast = now;
+  if (!camRenderer) {
+    camRenderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    camRenderer.setPixelRatio(1);
+    camRenderer.setSize(CAM_W, CAM_H, false);
+    camRenderer.shadowMap.enabled = true;
+    camRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    camRenderer.outputColorSpace = THREE.SRGBColorSpace;
+  }
+  camBusy = true;
+  (async () => {
+    try {
+      for (const id of wantedCams) {
+        if (!robotCams[id]) continue;
+        camRenderer.render(scene, robotCams[id]);      // layer 0 only: no editor helpers
+        const blob = await new Promise((r) => camRenderer.domElement.toBlob(r, "image/jpeg", 0.8));
+        if (blob) await fetch(`/api/frame?cam=${id}`, { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob });
+      }
+    } catch (e) {
+      // the simulator may be restarting - the next tick tries again
+    }
+    camBusy = false;
+  })();
+}
+
+function showCams(list) {
+  wantedCams = list || [];
+  const b = $("camBadge");
+  const names = wantedCams.map((i) => (i === 0 ? "FRONT" : "REAR")).join("+");
+  b.textContent = `📷 ${names}`;
+  b.classList.toggle("hidden", !wantedCams.length);
+}
+
+// ============================================================================
 // Render loop
 // ============================================================================
 let follow = false, showTrail = true;
@@ -613,6 +671,7 @@ function frame(now) {
 
   controls.update();
   renderer.render(scene, camera);
+  camTick(now);
   requestAnimationFrame(frame);
 }
 
@@ -634,7 +693,7 @@ let tool = "none";
 const ghost = new THREE.Mesh(new THREE.BoxGeometry(CELL, 1, CELL),
   new THREE.MeshBasicMaterial({ color: 0xff8a00, transparent: true, opacity: 0.35, depthWrite: false }));
 ghost.visible = false;
-scene.add(ghost);
+scene.add(editorOnly(ghost));
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
