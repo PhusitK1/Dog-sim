@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>คู่มือ Rover X1 Sim</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#161b22; --card:#1d232c; --line:#2a313c; --text:#e6e9ee; --muted:#8a94a3; --accent:#ff8a00; --accent2:#00d0ff; --ok:#7ee0a1; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:"IBM Plex Sans Thai","Leelawadee UI",Tahoma,system-ui,sans-serif; font-size:14px; line-height:1.7; }
+  .wrap { padding: 8px 18px 40px; max-width: 820px; }
+  h1 { font-size: 20px; margin: 14px 0 4px; }
+  h2 { font-size: 16px; color: var(--accent); margin: 26px 0 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+  h3 { font-size: 14px; color: var(--accent2); margin: 16px 0 4px; }
+  p { margin: 6px 0; }
+  a { color: var(--accent2); }
+  .muted { color: var(--muted); font-size: 12.5px; }
+  code { font-family:"JetBrains Mono",Consolas,monospace; font-size: 12.5px; background:#0b0e12; padding: 1px 5px; border-radius: 4px; color:#ffd59a; }
+  pre { background:#0b0e12; border:1px solid var(--line); border-radius:8px; padding:10px 12px; overflow-x:auto; position: relative; margin: 8px 0; }
+  pre code { background:none; padding:0; color:#d6deeb; }
+  .try { position:absolute; top:6px; right:6px; background:var(--accent); color:#111; border:0; border-radius:6px; font-family:inherit; font-size:12px; padding:3px 10px; cursor:pointer; font-weight:600; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 13px; }
+  th, td { text-align: left; border-bottom: 1px solid var(--line); padding: 6px 8px; vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  td:first-child { white-space: nowrap; }
+  .toc { display:flex; flex-wrap:wrap; gap:6px; margin: 10px 0; }
+  .toc a { color: var(--text); text-decoration:none; background: var(--card); border:1px solid var(--line); border-radius: 99px; padding: 2px 11px; font-size: 12.5px; }
+  .toc a:hover { border-color: var(--accent); }
+  .toc a.sim { color: var(--muted); }
+  .note { background:#221d10; border:1px solid #5b4a1c; border-radius:8px; padding:8px 12px; margin:10px 0; }
+  .tip { background:#0f2228; border:1px solid #1d5260; border-radius:8px; padding:8px 12px; margin:10px 0; }
+  .flow { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:8px 0; font-size:12.5px; }
+  .flow span { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:2px 8px; font-family:"JetBrains Mono",monospace; }
+  .flow b { color: var(--muted); font-weight: 400; }
+  .badge { font-size:11px; border-radius:99px; padding:1px 8px; margin-left:6px; vertical-align: middle; }
+  .real { background:#103322; color:var(--ok); border:1px solid #1e5a3b; }
+  svg { max-width: 100%; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>📖 คู่มือ Rover X1 Simulator</h1>
+<p class="muted">ฝึกเขียน Python ด้วย <b>คำสั่งเดียวกับหุ่นจริง</b> (Dobot <code>dobot_quad</code> SDK) ในสนาม 3 มิติ ก่อนนำไปใช้กับ Dobot Rover X1 ตัวจริง</p>
+
+<div class="toc">
+  <a href="#start">เริ่มต้น</a><a href="#state">สถานะ</a><a href="#move">เคลื่อนที่</a><a href="#balance">ทรงตัว</a>
+  <a href="#fx">ท่าพิเศษ & ไฟ</a><a href="#read">อ่านข้อมูล</a><a href="#auto">Auto-correct</a><a href="#map">Map</a>
+  <a href="#ex">โจทย์ฝึก</a><a href="#real">ใช้กับหุ่นจริง</a><a href="#diff" class="sim">ข้อจำกัด</a>
+</div>
+
+<h2 id="start">1. เริ่มต้น</h2>
+<p>เขียนโค้ดในแท็บ <b>🐍 Code</b> แล้วกด <b>▶ Run</b> (หรือ <code>Ctrl+Enter</code>) หุ่นจะทำตามทีละคำสั่ง บรรทัดที่กำลังทำงานจะมีไฮไลต์สีฟ้า และ Console จะแสดงคำสั่งที่กำลังทำ (▶ สีเขียว) คล้ายกับ SDK จริง</p>
+<pre><code>from dobot_quad import RobotClient
+
+robot = RobotClient("192.168.5.2:50051")   # หุ่นจริง: LAN 192.168.5.2 / WiFi 192.168.1.6
+robot.balance_stand()        # ยืนก่อนทุกครั้ง (หุ่นเริ่มต้นในท่าหมอบ)
+robot.walk_forward(2.0)      # เดินหน้า 2 m
+robot.rotate("left", 90)     # หมุนซ้าย 90°
+robot.stand_down()           # หมอบ</code><button class="try">ลองโค้ดนี้</button></pre>
+<ul>
+<li>ทุกโปรแกรมต้องมี <code>from dobot_quad import ...</code> และ <code>robot = RobotClient(...)</code> เหมือนหุ่นจริง — ถ้าลืม Auto-correct จะเติมให้</li>
+<li>ระบบหลบสิ่งกีดขวางเปิดอยู่ในโปรแกรมจำลอง แต่บนหุ่นจริงให้สั่ง <code>robot.set_obstacle_avoidance(True)</code> เองเพื่อความแน่นอน</li>
+<li>ค่าที่หุ่นจริงไม่รับ (เช่น <code>rotate("lefft", 90)</code>, <code>dance(duration=1)</code>) จะ <b>error เหมือนหุ่นจริง</b> พร้อมคำแนะนำ 💡 ส่วนคำพิมพ์ผิด Auto-correct แก้ในโค้ดให้</li>
+<li>หุ่นเริ่มต้นในสถานะ <code>stand_down</code> (หมอบ) ถ้าลืม <code>balance_stand()</code> ระบบจะสั่งให้และเตือน — แต่หุ่นจริงควรสั่งเองเสมอ</li>
+<li>พิมพ์ <code>robot.</code> จะมีรายการคำสั่ง SDK ขึ้นมาพร้อมพารามิเตอร์ (หรือกด <code>Ctrl+Space</code>)</li>
+<li><b>มีแต่คำสั่งของหุ่นจริง</b> (Poka-yoke) — ไม่มีคำสั่งพิเศษที่ใช้ได้เฉพาะในโปรแกรมจำลอง โค้ดที่รันผ่านในนี้จึงใช้คำสั่งที่หุ่นจริงมีทั้งหมด</li>
+</ul>
+<div class="tip">💡 <b>■ Stop</b> หยุดโปรแกรมได้ทุกเมื่อ · <b>↺ Reset</b> พาหุ่นกลับจุดเริ่ม · <b>Sim speed</b> 2×–8× ช่วยดูผลเร็วขึ้น · ช่อง <b>SDK state</b> มุมซ้ายบนบอกสถานะ, speed_ratio และ 🛡 หลบสิ่งกีดขวาง</div>
+
+<h3>ระบบพิกัด (ค่าที่ได้จาก get_state)</h3>
+<svg viewBox="0 0 360 170" width="360" height="170" role="img" aria-label="ระบบพิกัด">
+  <rect x="40" y="10" width="200" height="140" fill="#2b323c" stroke="#ff8a00"/>
+  <g stroke="#55606e" stroke-width="0.6">
+    <line x1="80" y1="10" x2="80" y2="150"/><line x1="120" y1="10" x2="120" y2="150"/><line x1="160" y1="10" x2="160" y2="150"/><line x1="200" y1="10" x2="200" y2="150"/>
+    <line x1="40" y1="45" x2="240" y2="45"/><line x1="40" y1="80" x2="240" y2="80"/><line x1="40" y1="115" x2="240" y2="115"/>
+  </g>
+  <line x1="40" y1="150" x2="100" y2="150" stroke="#ff5555" stroke-width="3"/><text x="104" y="164" fill="#ff7777" font-size="12">+X (yaw 0)</text>
+  <line x1="40" y1="150" x2="40" y2="90" stroke="#55ff77" stroke-width="3"/><text x="2" y="86" fill="#77ff99" font-size="12">+Y</text>
+  <text x="26" y="166" fill="#aaa" font-size="11">(0,0)</text>
+  <path d="M150 80 l22 0 m-6 -5 l6 5 l-6 5" stroke="#00d0ff" stroke-width="2" fill="none"/>
+  <circle cx="150" cy="80" r="5" fill="#00d0ff"/>
+  <path d="M172 72 A 22 22 0 0 0 150 58" stroke="#ffd59a" fill="none" stroke-dasharray="3 2"/>
+  <text x="160" y="52" fill="#ffd59a" font-size="11">rotate left → yaw เพิ่ม</text>
+  <text x="252" y="40" fill="#e6e9ee" font-size="12">pos_body: เมตร</text>
+  <text x="252" y="60" fill="#e6e9ee" font-size="12">ori_body: เรเดียน</text>
+  <text x="252" y="80" fill="#e6e9ee" font-size="12">1 ช่อง = 0.5 m</text>
+  <text x="252" y="100" fill="#e6e9ee" font-size="12">ทวนเข็ม = บวก</text>
+</svg>
+<p class="muted">ในโปรแกรมจำลอง (0,0) คือมุมซ้ายล่างของสนาม · หุ่นจริงจะนับจากจุดที่เปิดเครื่อง</p>
+
+<h2 id="state">2. สถานะ (state) ของหุ่น</h2>
+<div class="flow"><span>stand_down</span><b>→ balance_stand() →</b><span>balance_stand</span><b>→ walk() / flying_trot() →</b><span>walk ⇄ flying_trot</span><b>→ stand_down() / ready()</b></div>
+<table>
+<tr><td><code>balance_stand()</code></td><td>ยืนทรงตัว — สั่งก่อนเดิน และต้องอยู่สถานะนี้ตอนใช้ <code>balance_*</code> / <code>dynamic_pose</code></td></tr>
+<tr><td><code>walk()</code> / <code>flying_trot()</code> / <code>rl()</code></td><td>เปลี่ยนโหมดการเดิน (ยังไม่ออกเดิน) · <code>change_mode()</code> สลับเดิน ⇄ วิ่ง</td></tr>
+<tr><td><code>stand_down()</code> / <code>ready()</code></td><td>หมอบ / ค่อย ๆ หมอบอย่างปลอดภัย</td></tr>
+<tr><td><code>passive()</code> = <code>emergency()</code></td><td>ตัดไฟมอเตอร์ทันที (หุ่นจริงจะทรุดลง ใช้ตอนฉุกเฉิน)</td></tr>
+<tr><td><code>set_target_state("walk")</code></td><td>เปลี่ยนสถานะด้วยชื่อ</td></tr>
+<tr><td><code>get_current_state_name()</code></td><td>สถานะปัจจุบัน · ⚠ ยังไม่ทราบว่าหุ่นจริงคืนเป็นตัวเล็กหรือใหญ่ ถ้าจะเปรียบเทียบให้ใช้ <code>.lower()</code> เช่น <code>robot.get_current_state_name().lower() == "walk"</code></td></tr>
+<tr><td><code>enable_safety_ready()</code></td><td>หุ่นจริง: กด Ctrl+C แล้วหมอบอย่างปลอดภัย (ในโปรแกรมนี้ใช้ปุ่ม Stop)</td></tr>
+</table>
+
+<h2 id="move">3. เคลื่อนที่</h2>
+<table>
+<tr><td><code>walk_forward(d)</code> <code>walk_backward(d)</code><br><code>move_left(d)</code> <code>move_right(d)</code></td><td>เดินเส้นตรง d เมตร · <b>0–3 m ต่อคำสั่ง</b> (เกินจะถูกตัดเหลือ 3) · ใส่ <code>speed_ratio=</code> ชั่วคราวได้</td></tr>
+<tr><td><code>line_walk(direction, distance)</code></td><td>direction = 0 หน้า, 1 หลัง, 2 ซ้าย, 3 ขวา (หรือ "forward", "back", ...)</td></tr>
+<tr><td><code>rotate("left"/"right", angle)</code><br><code>rotate_left(a)</code> <code>rotate_right(a)</code></td><td>หมุนอยู่กับที่ 0–3600°</td></tr>
+<tr><td><code>circle("left", turns)</code></td><td>หมุนครบรอบ 1–10 รอบ</td></tr>
+<tr><td><code>rotate_walk(angle, distance)</code></td><td>หมุนไปทิศ angle แล้วเดิน · <b>บวก = ขวา</b>, ลบ = ซ้าย (−180..180)</td></tr>
+<tr><td><code>velocity_sequence(steps, gait="walk")</code></td><td>steps = <code>[(vx, vy, vyaw, วินาที), ...]</code> · vx/vy m/s, vyaw <b>rad/s</b> (บวก = หมุนซ้าย) · gait <code>"walk"</code>/<code>"flying_trot"</code> · ค่าเริ่มต้น <code>stand_down_after=True</code> หมอบเมื่อจบ</td></tr>
+<tr><td><code>set_speed_ratio(10–100)</code></td><td>ความเร็วพื้นฐาน (%) · อ่านค่าด้วย <code>get_speed_ratio()</code></td></tr>
+<tr><td><code>set_obstacle_avoidance(True/False)</code></td><td>🛡 หลบสิ่งกีดขวาง (เปิดอยู่แล้วตั้งแต่สร้าง RobotClient)</td></tr>
+</table>
+<p>ทุกคำสั่งเดินคืนผลลัพธ์ที่มี <code>.success</code> — ถ้าหุ่นหยุดก่อนถึงระยะ (เจอสิ่งกีดขวาง) จะได้ <code>False</code></p>
+<pre><code>from dobot_quad import RobotClient
+robot = RobotClient("192.168.5.2:50051")
+robot.balance_stand()
+robot.set_speed_ratio(70)
+for i in range(4):                 # เดินเป็นสี่เหลี่ยม 2x2 m
+    robot.walk_forward(2.0)
+    robot.rotate_left(90)
+steps = [(0.6, 0, 0.5, 4), (0, 0, 0, 1)]   # เดินโค้งซ้าย 4 วินาที แล้วหยุด
+robot.velocity_sequence(steps, gait="walk", stand_down_after=True)</code><button class="try">ลองโค้ดนี้</button></pre>
+
+<h2 id="balance">4. ทรงตัว / ท่าทาง <span class="muted">(ต้องอยู่ใน balance_stand)</span></h2>
+<table>
+<tr><td><code>balance_pitch(v, duration, mode)</code></td><td>ก้ม/เงย ±11.5° (บวก = ก้มหน้า)</td></tr>
+<tr><td><code>balance_roll(v, duration, mode)</code></td><td>เอียง ±17° (บวก = เอียงซ้าย)</td></tr>
+<tr><td><code>balance_yaw(v, duration, mode)</code></td><td>หันตัว ±11.5° (บวก = หันขวา)</td></tr>
+<tr><td><code>balance_height(v, duration, mode)</code></td><td>ย่อตัว −0.08 ถึง 0 m</td></tr>
+<tr><td><code>dynamic_pose(duration, roll_deg, pitch_deg, yaw_deg, height_m)</code><br><code>static_pose(...)</code></td><td>หลายแกนพร้อมกัน (ค่า 0 = ไม่เปลี่ยน) · duration 1–5 s</td></tr>
+<tr><td><code>balance_sequence([...])</code></td><td>หลายท่าต่อกัน <code>[("balance_pitch", 10, 2.0, "dynamic"), ...]</code></td></tr>
+<tr><td><code>balance_neutral()</code></td><td>กลับท่าตรง</td></tr>
+</table>
+<p class="muted">mode <code>"dynamic"</code> = ค่อย ๆ ไปถึงแล้วค้างไว้ · <code>"static"</code> = ไป–ค้าง–กลับท่าเดิม · duration 0.5–5 s</p>
+<pre><code>from dobot_quad import RobotClient
+robot = RobotClient("192.168.5.2:50051")
+robot.balance_stand()
+robot.balance_pitch(10, 2.0, "dynamic")
+robot.balance_roll(-15, 2.0, "static")
+robot.dynamic_pose(3.0, roll_deg=10, yaw_deg=-10, height_m=-0.05)
+robot.balance_neutral()</code><button class="try">ลองโค้ดนี้</button></pre>
+
+<h2 id="fx">5. ท่าพิเศษ & ไฟที่ขา</h2>
+<p><code>wave_hand(duration)</code> <code>jump()</code> <code>backflip()</code> <code>dance(duration=…)</code> <code>gongxi()</code> <code>recovery()</code><br>
+ท่าเต้นสั้น: <code>twirl_jump()</code> <code>diag_step()</code> <code>hop_step()</code> <code>groove()</code> <code>bounce()</code> <code>body_wave()</code> <code>hip_circle()</code> <code>head_circle()</code> (จบแล้วกลับเป็นสถานะ walk)</p>
+<p class="muted">⚠ <code>dance()</code> ค่าเริ่มต้นยาว 126.5 วินาทีเหมือนหุ่นจริง ใส่ <code>dance(duration=10)</code> ให้สั้นลง (4–128)</p>
+<table>
+<tr><td><code>set_all_legs_color(Color.GREEN)</code></td><td>ไฟทั้ง 4 ขา · สี: OFF RED ORANGE YELLOW GREEN CYAN BLUE PURPLE WHITE</td></tr>
+<tr><td><code>set_leg_color(Leg.FL, Color.BLUE)</code></td><td>ขาเดียว · ขา: FL FR RL RR (หน้าซ้าย หน้าขวา หลังซ้าย หลังขวา)</td></tr>
+<tr><td><code>set_legs_rgb([LegLedConfig(Leg.FL, 0, 0, 255), ...])</code></td><td>หลายขาในคำสั่งเดียว ต้องใช้ <code>LegLedConfig</code> · ⚠ แบบในเอกสาร <code>set_legs_rgb([Leg.FL], Color.BLUE)</code> ใช้กับหุ่นจริงไม่ได้ (error)</td></tr>
+<tr><td><code>set_leg_rgb(Leg.RR, 255, 0, 128)</code></td><td>ขาเดียว ค่า RGB 0–255 (เกินช่วง = ValueError เหมือนหุ่นจริง) · สีต้องเป็น <code>Color.X</code> ไม่ใช่ข้อความ <code>"green"</code></td></tr>
+<tr><td><code>set_leg_brightness(Leg.FL, 128)</code></td><td>ความสว่าง 0–255</td></tr>
+<tr><td><code>reset_legs()</code></td><td>คืนไฟให้หุ่นควบคุมเอง</td></tr>
+</table>
+<pre><code>from dobot_quad import RobotClient, Leg, Color
+robot = RobotClient()
+robot.balance_stand()
+robot.set_all_legs_color(Color.PURPLE)
+robot.set_leg_color(Leg.FL, Color.YELLOW)
+robot.set_leg_color(Leg.FR, Color.YELLOW)
+robot.jump()
+robot.twirl_jump()
+robot.reset_legs()</code><button class="try">ลองโค้ดนี้</button></pre>
+
+<h2 id="read">6. อ่านข้อมูลจากหุ่น</h2>
+<pre><code>from dobot_quad import RobotClient
+robot = RobotClient("192.168.5.2:50051")
+s = robot.get_state()
+print(s.current_state, s.current_speed_ratio, s.obstacle_avoidance_enabled)
+x, y, z = s.robot_state.pos_body          # ตำแหน่ง (m)
+roll, pitch, yaw = s.robot_state.ori_body # มุม (rad)
+vx, vy, vz = s.robot_state.vel_body       # ความเร็ว (m/s)
+print(round(x, 2), round(y, 2), round(yaw, 2))</code><button class="try">ลองโค้ดนี้</button></pre>
+<p class="muted">อื่น ๆ: <code>get_robot_type()</code> → "miniQuad" · <code>is_quad()</code> · <code>get_motions()</code> · ในโปรแกรมจำลองค่าแรงบิด/ข้อต่อ (<code>jtau_leg</code> ฯลฯ) เป็น 0</p>
+
+<h2 id="auto">7. Auto-correct</h2>
+<ul>
+<li>พิมพ์หยุดไปสักครู่ ระบบจะตรวจโค้ด: <b style="color:#ffc53d">สีเหลือง</b> = น่าจะพิมพ์ผิด (มีปุ่ม <b>Fix all</b>), <b style="color:#ff6b6b">สีแดง</b> = ไม่รู้จัก/SyntaxError</li>
+<li>ถ้าเปิด <b>Auto-correct</b> ไว้ ตอนกด Run จะแก้คำผิดให้อัตโนมัติแล้วบอกว่าแก้อะไรไปบ้าง</li>
+</ul>
+<table>
+<tr><th>พิมพ์ว่า</th><th>แก้เป็น</th></tr>
+<tr><td><code>from dobotquad import RobotClinet</code></td><td><code>from dobot_quad import RobotClient</code></td></tr>
+<tr><td><code>robot.walk_forwrd(2)</code></td><td><code>robot.walk_forward(2)</code></td></tr>
+<tr><td><code>robot.balanceStand()</code></td><td><code>robot.balance_stand()</code> (camelCase)</td></tr>
+<tr><td><code>robot.walk_left(1)</code> / <code>robot.set_balance_stand()</code></td><td><code>robot.move_left(1)</code> / <code>robot.balance_stand()</code> (ชื่อเก่าของ SDK)</td></tr>
+<tr><td><code>robot.turn_left(90)</code> / <code>robot.forward(2)</code></td><td><code>robot.rotate_left(90)</code> / <code>robot.walk_forward(2)</code></td></tr>
+<tr><td>ลืม <code>robot.</code> เช่น <code>walk_forward(2)</code></td><td><code>robot.walk_forward(2)</code></td></tr>
+<tr><td><code>robot.walk_forward(2, sped_ratio=80)</code></td><td><code>speed_ratio=80</code></td></tr>
+<tr><td><code>Colour.GREN</code>, <code>Leg.fr</code></td><td><code>Color.GREEN</code>, <code>Leg.FR</code></td></tr>
+<tr><td>ลืมเปลี่ยนแป้นพิมพ์: <code>พนินะใไฟสา๘ดนพไฟพก๖-๗</code></td><td><code>robot.walk_forward(3)</code></td></tr>
+<tr><td>เลขไทย <code>robot.walk_forward(๓)</code></td><td><code>robot.walk_forward(3)</code></td></tr>
+<tr><td>ข้อความไทยไม่มี # <code>robot.stand_down() หมอบ</code></td><td><code>robot.stand_down()  # หมอบ</code></td></tr>
+<tr><td><code>for i in range(3)</code> · <code>Print(“hi”)</code> · <code>rnage(4)</code></td><td>เติม <code>:</code> · <code>print("hi")</code> · <code>range(4)</code></td></tr>
+</table>
+<p><b>ตอนรัน:</b> ค่าที่เกินช่วงจะถูก clamp เหมือน SDK จริงพร้อมแจ้งใน Console (เช่น <code>walk_forward(5)</code> → 3 m, <code>balance_pitch(20)</code> → 11.5°) · ชื่อในเครื่องหมายคำพูดพิมพ์ผิดหรือเป็นภาษาไทยก็แก้ให้ เช่น <code>rotate("lefft", 90)</code>, <code>rotate("ซ้าย", 90)</code>, <code>gait="flying_trott"</code><br>ตัวแปรชื่อภาษาไทย (เช่น <code>ระยะ = 2</code>) ข้อความในเครื่องหมายคำพูด และคอมเมนต์ภาษาไทย ใช้ได้ตามปกติ ไม่ถูกแก้</p>
+<pre><code>from dobotquad import RobotClinet, Colour
+robot = RobotClinet("192.168.5.2:50051")
+robot.balanceStand()
+robot.walk_forwrd(5, sped_ratio=70)
+robot.walk_left(1)
+robot.rotate("lefft", 90)
+robot.set_all_legs_color(Colour.GREN)</code><button class="try">ลองโค้ดนี้</button></pre>
+
+<h2 id="map">8. วาด Map 3 มิติ</h2>
+<p>แท็บ <b>🗺 Map</b> → เลือกเครื่องมือ → คลิกบนพื้น (ลากเมาส์ = หมุนกล้อง, ล้อ = ซูม, คลิกขวาลาก = เลื่อน) · <b>Shift</b> ค้าง + ลาก = วาดต่อเนื่อง</p>
+<table>
+<tr><td>🧱 Wall / 🏢 Tall wall / 📦 Box</td><td>สิ่งกีดขวาง — ระบบหลบสิ่งกีดขวางจะหยุดหุ่นก่อนชน (<code>.success = False</code>)</td></tr>
+<tr><td>🪜 Step</td><td>สูง ≤ 0.15 m จากพื้นที่ยืนอยู่ หุ่นเดินขึ้นได้ (ต่อหลายขั้นเป็นบันได) · ก้าวลงได้ไม่เกิน 0.25 m ถ้าสูงกว่านั้นหุ่นจะหยุดที่ขอบ</td></tr>
+<tr><td>🚩 Goal flag</td><td>เป้าหมาย เข้าใกล้ 0.45 m = เก็บได้ ธงเปลี่ยนเป็นสีเขียว</td></tr>
+<tr><td>🐕 Start</td><td>คลิกช่องเดิมซ้ำ = หมุนทิศเริ่มทีละ 90°</td></tr>
+</table>
+<p>บันทึกเป็นไฟล์ <code>.json</code> แล้วเปิดภายหลังหรือส่งให้เพื่อนได้</p>
+
+<h2 id="ex">9. โจทย์ฝึก (ใช้คำสั่งจริงอย่างเดียว)</h2>
+<ol>
+<li><b>สี่เหลี่ยม</b> — เดินสี่เหลี่ยม 2×2 m กลับมาจุดเดิม แล้วเช็กตำแหน่งด้วย <code>get_state()</code></li>
+<li><b>ดาว 5 แฉก</b> — <code>for</code> + <code>walk_forward</code> + <code>rotate_right(144)</code></li>
+<li><b>เดินโค้ง</b> — ใช้ <code>velocity_sequence</code> วาดรูปเลข 8</li>
+<li><b>เดินไกลกว่า 3 m</b> — เขียนฟังก์ชัน <code>walk_far(d)</code> ที่แบ่งเป็นช่วงละไม่เกิน 3 m</li>
+<li><b>เก็บธง</b> — เขียน <code>go_to(x, y)</code> เองจาก <code>pos_body</code> + <code>ori_body</code> (ดูตัวอย่างที่ 4 ในเมนู 📂 Examples)</li>
+<li><b>หยุดก่อนชน</b> — เดินไปทางกำแพง ใช้ <code>.success</code> ตรวจว่าหุ่นหยุดเพราะเจอสิ่งกีดขวาง แล้วเปลี่ยนไฟขาเป็นสีแดง</li>
+<li><b>โชว์</b> — ทำชุดท่าทรงตัว + ไฟ + ท่าเต้น ยาว 30 วินาที</li>
+</ol>
+<pre><code># เฉลยข้อ 2: ดาว 5 แฉก
+from dobot_quad import RobotClient, Color
+robot = RobotClient()
+robot.balance_stand()
+robot.move_left(1.5)                 # ออกห่างขอบสนามก่อน ดาวต้องใช้พื้นที่
+robot.set_all_legs_color(Color.YELLOW)
+for i in range(5):
+    robot.walk_forward(2.0)
+    robot.rotate_right(144)
+robot.stand_down()</code><button class="try">ลองโค้ดนี้</button></pre>
+
+<h2 id="real">10. นำโค้ดไปใช้กับหุ่นจริง</h2>
+<ol>
+<li>ใช้คอมพิวเตอร์ <b>Ubuntu 22.04 + Python 3.10 ขึ้นไป</b> (ตาม README ของ SDK) — บน Windows อาจต้องใช้ WSL2</li>
+<li><code>git clone https://github.com/Dobot-Team/dobot_quad_sdk</code> → <code>cd high_level/python</code> → <code>pip install .</code></li>
+<li>ต่อเครือข่าย: สาย LAN → <code>192.168.5.2</code> (ตั้งเครื่องเราเป็น 192.168.5.xxx) หรือ WiFi ของหุ่น <code>Rover-*</code> → <code>192.168.1.6</code> แล้วแก้ IP ใน <code>RobotClient(...)</code></li>
+<li>คัดลอกโค้ดจากโปรแกรมจำลองไปเป็นไฟล์ <code>my_program.py</code> แล้วรัน <code>python3 my_program.py</code> (ต้องมีบรรทัด <code>from dobot_quad import RobotClient</code> และ <code>robot = RobotClient("IP:50051")</code>)</li>
+<li>ครั้งแรกทดสอบในที่โล่ง ใช้ <code>set_speed_ratio(30)</code> และ <code>robot.enable_safety_ready()</code></li>
+</ol>
+<p>อ้างอิง: <a href="https://github.com/Dobot-Team/dobot_quad_sdk" target="_blank">Dobot-Team/dobot_quad_sdk</a> → <code>docs/docs/api/high_level.md</code></p>
+
+<h2 id="diff">11. ข้อจำกัดของโปรแกรมจำลอง</h2>
+<div class="note">
+<p>⚠ เป็นตัวจำลองเพื่อฝึกเขียนโปรแกรม ไม่ได้มาจาก Dobot โดยตรง</p>
+<ul>
+<li><code>robot.*</code> ใช้ <b>ชื่อคำสั่ง/พารามิเตอร์/ช่วงค่า ตามเอกสาร SDK</b> แต่ผลที่ได้เป็นการประมาณ — ความเร็วที่ speed_ratio 100 ตั้งไว้ เดิน 1.0 m/s, วิ่ง 1.8 m/s (ไม่มีในเอกสาร ปรับได้ที่ <code>MODE_SPEED</code> ใน <code>sdk_compat.py</code>)</li>
+<li>ไม่มีฟิสิกส์จริง (แรง การลื่น การล้ม) ท่าเต้น/กระโดด/ตีลังกาเป็นแค่ภาพเคลื่อนไหว</li>
+<li>ระบบหลบสิ่งกีดขวางในนี้หยุดหุ่นเมื่อเข้าใกล้ ~12 cm — ของจริงอาจทำงานต่างไป</li>
+<li>Low-level SDK (DDS: มอเตอร์รายข้อ, IMU ดิบ, กล้อง RGB/Depth, แบตเตอรี่) และ <code>robot.video</code> ยังไม่ได้จำลอง — จึงไม่มีเซนเซอร์วัดระยะให้ใช้ ใช้ระบบหลบสิ่งกีดขวาง + <code>.success</code> แทน (ดูตัวอย่างที่ 5)</li>
+<li>ในโปรแกรมจำลองมีตัวแปร <code>robot</code> สร้างไว้ให้แล้ว แต่บนหุ่นจริงต้องเขียน <code>robot = RobotClient("IP:50051")</code> เอง</li>
+<li>หุ่นแบบล้อ (miniQuadW: <code>wheel_loco</code>, <code>drift</code>, <code>handstand</code>) ไม่รองรับ — Rover X1 ในนี้เป็นแบบขา</li>
+</ul>
+</div>
+</div>
+<script>
+document.querySelectorAll(".try").forEach((b) => b.addEventListener("click", () => {
+  const code = b.parentElement.querySelector("code").textContent;
+  window.parent.postMessage({ type: "try-code", code }, location.origin);
+}));
+</script>
+</body>
+</html>

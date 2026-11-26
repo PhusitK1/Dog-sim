@@ -1,0 +1,55 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Packaging / build output
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# PyInstaller (build_exe.bat writes the exe to the parent dir and uses %TEMP%
+# for work/spec, but cover a plain `pyinstaller server.py` run too)
+*.spec
+*.manifest
+RoverX1Sim.exe
+
+# Test / tooling caches
+.pytest_cache/
+.tox/
+.nox/
+.cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.mypy_cache/
+.ruff_cache/
+
+# --- Secrets / local config ---
+.env
+.env.*
+!.env.example
+
+# --- Editors ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- Windows / OneDrive cruft ---
+Thumbs.db
+ehthumbs.db
+desktop.ini
+*.lnk
+$RECYCLE.BIN/
+~$*

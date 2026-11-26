@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rover X1 Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="vendor/codemirror/codemirror.min.css">
+<link rel="stylesheet" href="vendor/codemirror/theme/material-darker.min.css">
+<link rel="stylesheet" href="vendor/codemirror/addon/hint/show-hint.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <!-- ======================= 3D VIEW ======================= -->
+  <section id="viewWrap">
+    <div id="view"></div>
+
+    <div class="hud" id="hud">
+      <div class="hud-title">DOBOT ROVER X1 <span id="runBadge" class="badge idle">IDLE</span></div>
+      <div class="hud-grid">
+        <span>Position</span><b id="hPos">-</b>
+        <span>Heading</span><b id="hYaw">-</b>
+        <span>Gait</span><b id="hGait">-</b>
+        <span>Posture</span><b id="hPost">-</b>
+        <span>SDK state</span><b id="hSdk">-</b>
+        <span>Velocity</span><b id="hVel">-</b>
+        <span>Distance</span><b id="hOdo">-</b>
+        <span>Battery</span><b id="hBat">-</b>
+        <span>Flags</span><b id="hGoal">-</b>
+        <span>Time</span><b id="hTime">-</b>
+      </div>
+    </div>
+
+    <div class="view-tools">
+      <button id="camFollow" title="Camera follows the robot">🎥 Follow</button>
+      <button id="camTop" title="Top-down view">⬇ Top</button>
+      <button id="camReset" title="Default view">⟲ Reset view</button>
+      <button id="toggleTrail" title="Show/hide the trail">〰 Trail</button>
+    </div>
+
+    <div id="offline" class="offline hidden">⚠ The simulator is not running - open RoverX1Sim.exe (or run python server.py). Reconnecting…</div>
+
+    <div id="editBar" class="edit-bar hidden">
+      <span class="edit-label">Map editing:</span> <b id="editToolName">-</b>
+      <span class="muted">click the floor to place · drag to rotate the camera</span>
+    </div>
+
+  </section>
+
+  <!-- ======================= SIDE PANEL ======================= -->
+  <section id="panel">
+    <nav class="tabs">
+      <button class="tab active" data-tab="code">🐍 Code</button>
+      <button class="tab" data-tab="map">🗺 Map</button>
+      <button class="tab" data-tab="manual">📖 Manual</button>
+    </nav>
+
+    <!-- ---------- CODE TAB ---------- -->
+    <div class="tabpane active" id="tab-code">
+      <div class="toolbar">
+        <button id="btnRun" class="primary">▶ Run</button>
+        <button id="btnStop" class="danger">■ Stop</button>
+        <button id="btnReset">↺ Reset</button>
+        <button id="btnCheck" title="Check the code and fix typos">🔧 Check code</button>
+        <select id="examples" title="Example programs"><option value="">📂 Examples…</option></select>
+      </div>
+      <div class="toolbar small">
+        <label><input type="checkbox" id="optAuto" checked> Auto-correct</label>
+        <label><input type="checkbox" id="optReset" checked> Reset before run</label>
+        <label>Sim speed
+          <select id="simSpeed">
+            <option value="0.5">0.5×</option><option value="1" selected>1×</option>
+            <option value="2">2×</option><option value="4">4×</option><option value="8">8×</option>
+          </select>
+        </label>
+        <span class="muted kbd">Ctrl+Enter = Run · Ctrl+Space = autocomplete</span>
+      </div>
+      <div id="editorWrap"><textarea id="code"></textarea></div>
+      <div id="fixBox" class="fixbox hidden"></div>
+      <div class="console-head">
+        <span>Console</span>
+        <button id="btnClear" class="tiny">Clear</button>
+      </div>
+      <div id="console"></div>
+    </div>
+
+    <!-- ---------- MAP TAB ---------- -->
+    <div class="tabpane" id="tab-map">
+      <h3>Map tools</h3>
+      <div class="tools" id="tools">
+        <button data-tool="none" class="tool active">🖐 View only</button>
+        <button data-tool="wall" class="tool">🧱 Wall (0.6 m)</button>
+        <button data-tool="tall" class="tool">🏢 Tall wall (1.2 m)</button>
+        <button data-tool="block" class="tool">📦 Box (0.3 m)</button>
+        <button data-tool="step" class="tool">🪜 Step (0.1 m, walkable)</button>
+        <button data-tool="step2" class="tool">🪜 Step 2 (0.14 m)</button>
+        <button data-tool="goal" class="tool">🚩 Goal flag</button>
+        <button data-tool="start" class="tool">🐕 Start (click again = rotate)</button>
+        <button data-tool="erase" class="tool">🧽 Eraser</button>
+      </div>
+      <p class="muted">Pick a tool and click on the floor. 1 cell = 0.5 × 0.5 m · hold Shift and drag to paint</p>
+
+      <h3>Preset maps</h3>
+      <div class="tools" id="presets"></div>
+
+      <h3>Field size</h3>
+      <div class="row">
+        <label>Width X <input type="number" id="mapW" min="4" max="40" step="1" value="10"> m</label>
+        <label>Depth Y <input type="number" id="mapD" min="4" max="40" step="1" value="10"> m</label>
+        <button id="btnResize">Apply</button>
+      </div>
+
+      <h3>Save / open</h3>
+      <div class="row">
+        <button id="btnSaveMap">💾 Save as .json</button>
+        <label class="filebtn">📂 Open map file<input type="file" id="fileMap" accept=".json" hidden></label>
+        <button id="btnClearMap" class="danger">🗑 Clear map</button>
+      </div>
+      <p class="muted" id="mapInfo"></p>
+    </div>
+
+    <!-- ---------- MANUAL TAB ---------- -->
+    <div class="tabpane" id="tab-manual">
+      <iframe id="manualFrame" src="manual.html" title="Manual"></iframe>
+    </div>
+  </section>
+</div>
+
+<script src="vendor/codemirror/codemirror.min.js"></script>
+<script src="vendor/codemirror/mode/python/python.min.js"></script>
+<script src="vendor/codemirror/addon/hint/show-hint.min.js"></script>
+<script src="vendor/codemirror/addon/edit/matchbrackets.min.js"></script>
+<script src="vendor/codemirror/addon/edit/closebrackets.min.js"></script>
+<script type="importmap">
+{ "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/controls/OrbitControls.js": "./vendor/three/OrbitControls.js"
+} }
+</script>
+<script src="examples.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
